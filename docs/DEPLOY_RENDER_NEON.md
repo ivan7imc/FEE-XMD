@@ -11,6 +11,42 @@ Guia passo a passo para rodar o bot no [Render](https://render.com) usando o
 
 ---
 
+## 0. ⚠️ Antes de tudo: informe o SEU número
+
+O `index.js` original vem com o número do autor **fixo no código**
+(`255752593977`). Ele é usado para duas coisas:
+
+1. pedir o **pairing code** no primeiro boot;
+2. decidir quem é o **dono** do bot (`isDevNumber`) — ou seja, quem pode usar
+   os comandos de owner.
+
+Sem configurar, o bot vai gerar um código de pareamento para o número do
+autor e vai tratar o autor como dono. Para evitar isso este fork lê as
+variáveis abaixo:
+
+| Variável         | Para que serve                                                    |
+| ---------------- | ----------------------------------------------------------------- |
+| `OWNER_NUMBER`   | **seu** número (formato internacional, só dígitos) — vira o dono   |
+| `DEV_NUMBER`     | alias de `OWNER_NUMBER` (compatibilidade)                          |
+| `PAIR_NUMBER`    | número usado no pairing code (se omitido, usa o `OWNER_NUMBER`)    |
+| `PAIRING_NUMBER` | alias de `PAIR_NUMBER`                                             |
+
+Ordem de precedência:
+`PAIR_NUMBER` → `PAIRING_NUMBER` → `OWNER_NUMBER` → `DEV_NUMBER` → valor do
+código original.
+
+Exemplo (Brasil, +55 31 99988-7766):
+
+```
+OWNER_NUMBER=5531999887766
+```
+
+> O `render.yaml` já declara `OWNER_NUMBER` e `PAIR_NUMBER` como
+> `sync: false`, então o Render pede os dois na hora de aplicar o Blueprint —
+> preencha pelo menos o `OWNER_NUMBER`.
+
+---
+
 ## 1. Criar o banco no Neon
 
 1. Crie uma conta em <https://neon.tech> e um **Project**.
@@ -80,6 +116,8 @@ Variáveis de ambiente:
 | `BOTNAME`       | `FEE-XMD`                                                |
 | `CODE`          | `255` (código do país usado no pareamento)               |
 | `DEVICE`        | `default` (`android` = botões, `ios` = texto)            |
+| `OWNER_NUMBER`  | **seu** número, só dígitos (ex.: `5531999887766`) — define o dono |
+| `PAIR_NUMBER`   | opcional; número do pairing code se for diferente do dono |
 
 ---
 
@@ -92,9 +130,14 @@ Não existe mais QR na tela: o bot gera um **pairing code**.
 
    ```
    [SESSION] store=postgres (Neon) namespace="default" linked=no
-   📱 No session found, requesting pairing code...
+   📱 No session found, requesting pairing code... (5531999887766)
    🔐 PAIRING CODE: ABCD-EFGH
    ```
+
+   Confira o número entre parênteses: ele tem que ser o seu, o mesmo que você
+   colocou em `OWNER_NUMBER`/`PAIR_NUMBER`. Se aparecer `255752593977`, a
+   variável de ambiente não chegou ao processo — revise em
+   **Environment** e faça *Manual Deploy → Clear build cache*.
 
 3. No celular: **WhatsApp → ⋮ (ou ⚙) → Aparelhos conectados → Conectar um
    aparelho → Não consegue acessar a câmera?** e digite o código.
@@ -134,7 +177,7 @@ APP_URL=https://SEU-SERVICO.onrender.com npm run keepalive
 | `render.yaml`        | Blueprint do Render (build/start/health check/env vars).                 |
 | `lib/authState.js`   | **Novo.** Sessão do WhatsApp no Postgres (`whatsapp_auth`) em vez de arquivos, com fallback automático para a pasta `Session/`. |
 | `database/config.js` | `node:sqlite` virou import opcional (o app agora sobe em qualquer Node ≥ 20); `DATABASE_URL` com `sslmode=disable` é respeitado; exporta o pool (`pgPool`). |
-| `index.js`           | Usa o `useAuthState` novo; detecta "já pareado?" pelo banco em vez de `Session/creds.json`; limpa a sessão do banco no logout. |
+| `index.js`           | Usa o `useAuthState` novo; detecta "já pareado?" pelo banco em vez de `Session/creds.json`; limpa a sessão do banco no logout; o número de pareamento/dono deixou de ser fixo e agora vem de `OWNER_NUMBER`/`PAIR_NUMBER` (fallback: o número original do autor). |
 | `scripts/keepalive.js` | **Novo.** Ping em `/health` para evitar o spin-down do plano free.      |
 | `.node-version`      | Node 22.                                                                |
 
@@ -145,7 +188,80 @@ Variáveis extras:
 
 ---
 
-## 6. Solução de problemas
+## 6. Como a aplicação funciona (visão geral)
+
+```
+        celular (WhatsApp)
+                │  WebSocket (protocolo WhatsApp Web)
+                ▼
+        index.js  ── startFredi() ──► @whiskeysockets/baileys (fork)
+                │                          │
+                │                          ├── auth  ──► lib/authState.js ──► Neon (whatsapp_auth)
+                │                          └── eventos ─► store / handlers ─► plugins (src/*.js)
+                │
+                ├──► database/config.js ──► Neon (Postgres) | SQLite | whatsasena.json
+                └──► app Express ──► GET /  (página) e GET /health
+```
+
+**Boot (`node index.js`)**
+
+1. Lê as variáveis de ambiente (`DATABASE_URL`, `OWNER_NUMBER`, `PAIR_NUMBER`,
+   `SESSION_STORE`, `SESSION_NAME`, `PORT`…).
+2. Sobe o servidor Express na porta do `PORT` (o Render injeta `10000`). Ele
+   serve a página `/` e o **health check `/health`** — é esse endpoint que o
+   Render monitora e que o keepalive fica pingando.
+3. Chama `startFredi()`, que monta o socket do WhatsApp.
+
+**Conexão / sessão (`lib/authState.js`)**
+
+* Com `DATABASE_URL` definido, as credenciais do WhatsApp (`creds` + chaves de
+  criptografia) ficam na tabela **`whatsapp_auth` do Neon**, e não na pasta
+  `Session/`. Isso é essencial no Render: o disco é efêmero, então a cada
+  restart a pasta sumiria e o bot pediria pareamento de novo.
+* Sem `DATABASE_URL`, o comportamento é o original: `Session/` em arquivos.
+  `SESSION_STORE=file|postgres|auto` força um ou outro.
+* No primeiro boot não existe sessão (`linked=no`) → o bot chama
+  `requestPairingCode(PAIR_NUMBER)` e imprime `🔐 PAIRING CODE: XXXX-XXXX`.
+  Você digita esse código no celular (Aparelhos conectados → *Não consegue
+  acessar a câmera?*). Depois disso a sessão fica salva no banco e os próximos
+  boots mostram `linked=yes` e conectam sozinhos.
+* Se o WhatsApp mandar `loggedOut`, a sessão é apagada do banco e o ciclo de
+  pareamento recomeça.
+
+**Reconexão**
+
+Baileys emite `connection.update`. O bot trata cada motivo
+(`restartRequired`, `timedOut`, `badSession`, `connectionClosed`…) com
+**backoff exponencial** e religa sozinho; `loggedOut` limpa a sessão.
+
+**Banco de dados (`database/config.js`)**
+
+Três backends, escolhidos automaticamente nesta ordem:
+
+1. **PostgreSQL / Neon** quando `DATABASE_URL` existe — usado por settings,
+   grupos, sudo, bans, warns, histórico de conversa, mapa LID↔telefone e a
+   sessão. As tabelas são criadas no primeiro boot.
+2. **SQLite** (`node:sqlite` do Node 22+ ou `better-sqlite3`) para uso local.
+3. **JSON** (`whatsasena.json`) se não houver nenhum dos dois.
+
+As queries são escritas uma vez e traduzidas para cada backend (`?` no SQLite,
+`$1` no Postgres).
+
+**Mensagens e comandos**
+
+Cada mensagem recebida passa pelo handler de eventos → normalização de JID/LID
+→ detecção de prefixo → plugin correspondente em `src/`/plugins. Comandos de
+owner dependem de `isDevNumber()`, que compara o remetente com o
+`OWNER_NUMBER` — por isso configurar essa variável é importante.
+
+**Manter acordado**
+
+No plano Free do Render a instância dorme após 15 min sem tráfego HTTP. Um
+ping em `/health` a cada 5–10 min (UptimeRobot, cron-job.org ou o
+`scripts/keepalive.js` num Cron Job pago) mantém tudo de pé.
+
+
+## 7. Solução de problemas
 
 **Build falha compilando módulos nativos (`sharp`, `canvas`, `better-sqlite3`)**
 O `sharp` é dependência obrigatória do fork do Baileys e do
@@ -196,7 +312,7 @@ no console do Neon (ou rode com `SESSION_NAME` novo).
 
 ---
 
-## 7. Banco local sem Neon (desenvolvimento)
+## 8. Banco local sem Neon (desenvolvimento)
 
 Sem `DATABASE_URL` o bot continua funcionando: SQLite (`node:sqlite` ou
 `better-sqlite3`) e, se não houver nenhum dos dois, um JSON

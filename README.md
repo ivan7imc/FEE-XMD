@@ -82,7 +82,11 @@ restarts and redeploys even though Render's filesystem is ephemeral.
 
 1. **New + → Blueprint** on Render, point it at this repo.
 2. Paste your Neon **pooled** connection string (`...?sslmode=require`) into `DATABASE_URL`.
-3. Read the pairing code in the service logs and link WhatsApp.
+3. Set **`OWNER_NUMBER`** to *your* number in international format, digits only
+   (e.g. `5531999887766`). Upstream this was hardcoded to the author's number
+   (`255752593977`) and it controls both the pairing code and who the bot
+   treats as its owner — do not skip it.
+4. Read the pairing code in the service logs and link WhatsApp.
 
 Full walkthrough (in Portuguese): [`docs/DEPLOY_RENDER_NEON.md`](./docs/DEPLOY_RENDER_NEON.md).
 
@@ -140,6 +144,18 @@ MODS=255752593977
 MONGODB_URI=your_mongodb_uri
 CRON=0 */2 * * *
 WELCOME=true
+
+# Your number (international format, digits only). It is used both for the
+# pairing code and to decide who the bot owner is.
+OWNER_NUMBER=5531999887766
+# Optional: pair with a different number than the owner one.
+# PAIR_NUMBER=5531999887766
+
+# Postgres/Neon. Without DATABASE_URL the bot falls back to SQLite/JSON and
+# keeps the WhatsApp session in the local Session/ folder.
+DATABASE_URL=postgresql://user:pass@ep-xxx-pooler.<region>.aws.neon.tech/neondb?sslmode=require
+SESSION_STORE=auto
+SESSION_NAME=default
 ```
 
 4. Start the bot:
@@ -151,7 +167,7 @@ npm run dev
 npm start
 ```
 
-5. Access the dashboard: Open http://localhost:3000 and scan the QR code with WhatsApp.
+5. Access the dashboard: Open http://localhost:3000. On the first run the bot prints a **pairing code** in the terminal (there is no QR code) — type it in WhatsApp → *Linked devices* → *Link a device* → *Can't scan the QR code?*.
 
 
 ## 🎯 Bot Commands

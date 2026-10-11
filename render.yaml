@@ -66,6 +66,21 @@ services:
       - key: SESSION_NAME
         value: default
 
+      # --- YOUR phone number (IMPORTANT!) ------------------------------------
+      # index.js ships with the original author's number hardcoded
+      # (255752593977) and uses it for two things: requesting the pairing code
+      # and deciding who is the bot OWNER (isDevNumber). If you do not set
+      # this, the bot will ask for a pairing code for SOMEBODY ELSE'S number.
+      #
+      # OWNER_NUMBER -> your number in international format, digits only.
+      #                 Example for Brazil +55 31 99988-7766 -> 5531999887766
+      # PAIR_NUMBER  -> optional, only if you want to pair with a number that
+      #                 is different from the owner number.
+      - key: OWNER_NUMBER
+        sync: false
+      - key: PAIR_NUMBER
+        sync: false
+
       # --- Bot basics (all optional) -----------------------------------------
       - key: BOTNAME
         value: FEE-XMD
