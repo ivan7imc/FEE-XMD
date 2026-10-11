@@ -5,7 +5,10 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node --experimental-sqlite index.js",
+    "start": "node index.js",
+    "start:sqlite": "node --experimental-sqlite index.js",
+    "patch": "node patch-baileys.js",
+    "keepalive": "node scripts/keepalive.js",
     "prestart": "node patch-baileys.js"
   },
   "engines": {

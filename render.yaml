@@ -1,0 +1,105 @@
+# ---------------------------------------------------------------------------
+# FEE-XMD — Render Blueprint (Infrastructure as Code)
+# ---------------------------------------------------------------------------
+# How to use it:
+#   Render dashboard -> New + -> Blueprint -> connect this repo -> Render reads
+#   this file and creates the service. The only value you have to type in is
+#   DATABASE_URL (the Neon connection string), because it is a secret and is
+#   marked with `sync: false` below.
+#
+# Database: Neon (serverless Postgres). The bot already speaks Postgres through
+#   DATABASE_URL (database/config.js) and now also keeps the WhatsApp session
+#   there (lib/authState.js), so the session survives restarts and redeploys
+#   even though Render's filesystem is ephemeral.
+#
+# Full walkthrough: docs/DEPLOY_RENDER_NEON.md
+# ---------------------------------------------------------------------------
+services:
+  - type: web
+    name: fee-xmd
+    runtime: node
+    # free  -> spins down after 15 min idle (wakes on HTTP request)
+    # starter -> always on, also allows a persistent disk. Recommended for a
+    #            bot that must stay online 24/7.
+    plan: free
+    region: oregon # pick the region closest to your Neon project (Oregon = AWS us-west-2)
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /health
+
+    buildCommand: |
+      (apt-get update -qq && apt-get install -y -qq ffmpeg) || echo "[build] system ffmpeg unavailable, using the bundled @ffmpeg-installer binary"
+      npm install --no-audit --no-fund
+      node patch-baileys.js
+
+    # `node index.js` (no --experimental-sqlite): Postgres/Neon is the database,
+    # so node:sqlite is not needed. Use `npm start` if you prefer the prestart
+    # hook to run patch-baileys.js on every boot as well.
+    startCommand: node index.js
+
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+
+      - key: NODE_ENV
+        value: production
+
+      # Render injects PORT automatically, the bot reads it (default 10000).
+      - key: PORT
+        value: "10000"
+
+      # --- Neon connection string (secret: fill it in the dashboard) ---------
+      # Use the POOLED connection string from the Neon console, e.g.
+      # postgresql://user:pass@ep-xxx-pooler.<region>.aws.neon.tech/neondb?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+
+      # --- Session (WhatsApp credentials) storage ----------------------------
+      # auto     -> Postgres when DATABASE_URL is set, otherwise Session/ files
+      # postgres -> force Postgres (errors if it is unreachable -> falls back)
+      # file     -> force the classic Session/ folder (needs a Render disk)
+      - key: SESSION_STORE
+        value: auto
+
+      # Namespace for the session rows. Change it if you run more than one bot
+      # against the same Neon database.
+      - key: SESSION_NAME
+        value: default
+
+      # --- Bot basics (all optional) -----------------------------------------
+      - key: BOTNAME
+        value: FEE-XMD
+      - key: CODE
+        value: "255" # default country code used when pairing
+      - key: DEVICE
+        value: default # android (interactive buttons) | ios (plain text) | default
+
+# ---------------------------------------------------------------------------
+# OPTIONAL — uncomment for an always-on bot on a paid plan.
+#
+# 1) Keep the free instance awake. Render free web services spin down after
+#    15 minutes without traffic; a cron job pinging /health keeps it alive.
+#    (Cron jobs are only available on paid plans — on the free plan use a free
+#    external monitor such as UptimeRobot or cron-job.org instead.)
+#
+#  - type: cron
+#    name: fee-xmd-keepalive
+#    runtime: node
+#    plan: starter
+#    region: oregon
+#    schedule: "*/10 * * * *"   # every 10 minutes, UTC
+#    buildCommand: npm install --no-audit --no-fund --omit=optional
+#    startCommand: node scripts/keepalive.js
+#    envVars:
+#      - key: APP_URL
+#        value: https://fee-xmd.onrender.com
+#
+# 2) Persistent disk, ONLY if you set SESSION_STORE=file. With the default
+#    SESSION_STORE=auto the session lives in Neon and no disk is needed.
+#    Disks require a paid instance plan.
+#
+#    disk:
+#      name: fee-session
+#      mountPath: /opt/render/project/src/Session
+#      sizeGB: 1
+# ---------------------------------------------------------------------------

@@ -6,3 +6,6 @@ session.json
 creds.json
 .DS_Store
 *.session
+Session/
+whatsasena.json
+features/feexmd/

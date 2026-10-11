@@ -68,10 +68,23 @@
 ### Supported Platforms
 - Heroku (Free tier available)
 - Railway (Always-on free tier)
-- Render (Free web services)
+- **Render (Free web services) + Neon Postgres** — see [`render.yaml`](./render.yaml) and the [step-by-step guide](./docs/DEPLOY_RENDER_NEON.md)
 - Koyeb (2 always-free instances)
 - Replit (Cloud IDE with hosting)
 - Panels (all free panel and pro)
+
+### Render + Neon (one-click blueprint)
+
+The repo ships a [Render Blueprint](./render.yaml) that boots the bot with
+[Neon](https://neon.tech) as its database. Settings, groups, warns, history and
+**the WhatsApp session itself** are stored in Postgres, so the bot survives
+restarts and redeploys even though Render's filesystem is ephemeral.
+
+1. **New + → Blueprint** on Render, point it at this repo.
+2. Paste your Neon **pooled** connection string (`...?sslmode=require`) into `DATABASE_URL`.
+3. Read the pairing code in the service logs and link WhatsApp.
+
+Full walkthrough (in Portuguese): [`docs/DEPLOY_RENDER_NEON.md`](./docs/DEPLOY_RENDER_NEON.md).
 
 
 ## 📥 Download & Installation
